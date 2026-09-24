@@ -193,7 +193,7 @@ fun SajilAppMainScreen(
     // Collect once; snapshotFlow + debounce persists only after typing pauses.
     LaunchedEffect(Unit) {
         com.example.data.gemini.GeminiClient.setApiKey(geminiApiKey)
-        kotlinx.coroutines.flow.snapshotFlow { geminiApiKey }
+        snapshotFlow { geminiApiKey }
             .debounce(500)
             .collect { key ->
                 prefs.edit().putString("gemini_api_key", key).apply()

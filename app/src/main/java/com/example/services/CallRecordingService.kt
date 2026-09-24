@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -303,7 +304,7 @@ class CallRecordingService : Service() {
     private fun startTimers() {
         timerJob?.cancel()
         timerJob = serviceScope.launch(Dispatchers.Main) {
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 delay(1000)
                 CallStateTracker.durationSec.value += 1
             }
@@ -312,7 +313,7 @@ class CallRecordingService : Service() {
         amplitudeJob?.cancel()
         amplitudeJob = serviceScope.launch(Dispatchers.Main) {
             val window = ArrayDeque<Float>(51)
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 delay(200)
                 val amp = recorderManager.getAmplitude()
                 val normalized = (amp.toFloat() / 32767f).coerceIn(0f, 1f)
