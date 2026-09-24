@@ -1,0 +1,118 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "6f1d6d02f0e8b4c5a7e9f1d2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
+    "entities": [
+      {
+        "tableName": "recordings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `recordings` (`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, `title` TEXT NOT NULL, `source` TEXT NOT NULL, `direction` TEXT NOT NULL, `durationSec` INTEGER NOT NULL, `filePath` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `isTranscribed` INTEGER NOT NULL, `transcript` TEXT, `summary` TEXT, `sentiment` TEXT, `importantPoints` TEXT, `notes` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "primaryKeyPosition": 1
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "durationSec",
+            "columnName": "durationSec",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "filePath",
+            "columnName": "filePath",
+            "affinity": "TEXT",
+            "notNull": true,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "isTranscribed",
+            "columnName": "isTranscribed",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "transcript",
+            "columnName": "transcript",
+            "affinity": "TEXT",
+            "notNull": false,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "summary",
+            "columnName": "summary",
+            "affinity": "TEXT",
+            "notNull": false,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "sentiment",
+            "columnName": "sentiment",
+            "affinity": "TEXT",
+            "notNull": false,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "importantPoints",
+            "columnName": "importantPoints",
+            "affinity": "TEXT",
+            "notNull": false,
+            "primaryKeyPosition": 0
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false,
+            "primaryKeyPosition": 0
+          }
+        ],
+        "primaryKey": {
+          "columnNames": [
+            "id"
+          ],
+          "autoGenerate": true
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6f1d6d02f0e8b4c5a7e9f1d2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2')"
+    ]
+  }
+}

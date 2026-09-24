@@ -11,7 +11,7 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk = 35
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.aistudio.sajil.qvkfzm"
