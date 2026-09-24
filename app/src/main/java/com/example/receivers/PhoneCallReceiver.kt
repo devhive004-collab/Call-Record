@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.telephony.TelephonyManager
 import android.util.Log
+import com.example.services.AutoRecordPrefs
 import com.example.services.CallRecordingService
+import com.example.services.CallStateTracker
 
 class PhoneCallReceiver : BroadcastReceiver() {
     private val TAG = "PhoneCallReceiver"
@@ -45,6 +47,15 @@ class PhoneCallReceiver : BroadcastReceiver() {
                 isIncoming = true
                 lastState = TelephonyManager.EXTRA_STATE_RINGING
                 Log.d(TAG, "Ringing... Incoming call detected.")
+                // Publish for the accessibility trigger (same process): on
+                // Android 12+ the receiver's own startForegroundService may
+                // be blocked from background, but the a11y service can still
+                // start recording when the in-call UI appears.
+                if (number != null) {
+                    CallStateTracker.pendingNumber = number
+                }
+                CallStateTracker.pendingDirection = "INBOUND"
+                CallStateTracker.pendingAtMillis = System.currentTimeMillis()
                 // NOTE: Do NOT launch MainActivity from background here.
                 // Background activity starts are blocked on Android 10+ and
                 // interrupt the dialer. The recording service posts a
@@ -54,7 +65,22 @@ class PhoneCallReceiver : BroadcastReceiver() {
                 // Call answered or outgoing call placed
                 val direction = if (isIncoming) "INBOUND" else "OUTBOUND"
                 Log.d(TAG, "Off-hook: starting CallRecordingService. Direction = $direction, Number = $savedNumber")
-                
+
+                // Always publish the signal: even if our own FGS start is
+                // blocked (Android 12+ background start), the accessibility
+                // service uses this to start with the right metadata.
+                CallStateTracker.pendingDirection = direction
+                if (savedNumber != null) {
+                    CallStateTracker.pendingNumber = savedNumber
+                }
+                CallStateTracker.pendingAtMillis = System.currentTimeMillis()
+
+                if (!AutoRecordPrefs.isEnabled(context)) {
+                    Log.d(TAG, "Auto-record disabled by user, skipping service start.")
+                    lastState = TelephonyManager.EXTRA_STATE_OFFHOOK
+                    return
+                }
+
                 val serviceIntent = Intent(context, CallRecordingService::class.java).apply {
                     action = CallRecordingService.ACTION_START_RECORDING
                     putExtra(CallRecordingService.EXTRA_PHONE_NUMBER, savedNumber)
@@ -77,6 +103,9 @@ class PhoneCallReceiver : BroadcastReceiver() {
             }
             TelephonyManager.EXTRA_STATE_IDLE -> {
                 Log.d(TAG, "Idle: stopping CallRecordingService.")
+                // Call over: pending signal is stale from here on.
+                CallStateTracker.pendingNumber = null
+                CallStateTracker.pendingAtMillis = 0L
                 val serviceIntent = Intent(context, CallRecordingService::class.java).apply {
                     action = CallRecordingService.ACTION_STOP_RECORDING
                 }

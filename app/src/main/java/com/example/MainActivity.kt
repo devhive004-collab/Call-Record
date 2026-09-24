@@ -29,6 +29,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Arrangement
@@ -86,6 +88,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -120,6 +123,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -433,7 +437,9 @@ fun SajilAppMainScreen(
                     text = {
                         Text(
                             "المكالمات المسجلة",
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             color = if (selectedTab == 0) HighDensityPrimary else HighDensitySubText,
                             fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal
                         )
@@ -446,7 +452,9 @@ fun SajilAppMainScreen(
                     text = {
                         Text(
                             "التحكم والتسجيل",
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             color = if (selectedTab == 1) HighDensityPrimary else HighDensitySubText,
                             fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal
                         )
@@ -459,7 +467,9 @@ fun SajilAppMainScreen(
                     text = {
                         Text(
                             "دليل الصلاحيات",
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             color = if (selectedTab == 2) HighDensityPrimary else HighDensitySubText,
                             fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal
                         )
@@ -478,7 +488,16 @@ fun SajilAppMainScreen(
                     .padding(horizontal = 16.dp)
             ) {
                 when (selectedTab) {
-                    0 -> RecordingsListTab(viewModel)
+                    0 -> RecordingsListTab(
+                        viewModel = viewModel,
+                        hasMicPermission = hasMicPermission,
+                        hasPhoneStatePermission = hasPhoneStatePermission,
+                        hasAccessibilityPermission = hasAccessibilityPermission,
+                        hasOverlayPermission = hasOverlayPermission,
+                        isRecordingActive = isRecordingActive || isServiceRecording,
+                        onOpenGuide = { selectedTab = 2 },
+                        onGoToRecorder = { selectedTab = 1 }
+                    )
                     1 -> RecorderAndSimTab(viewModel, hasMicPermission) {
                         // Launch permission request if needed
                         permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
@@ -678,7 +697,16 @@ fun TopSajilHeader(
 // ---------------------------------------------------------------------------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecordingsListTab(viewModel: CallRecorderViewModel) {
+fun RecordingsListTab(
+    viewModel: CallRecorderViewModel,
+    hasMicPermission: Boolean,
+    hasPhoneStatePermission: Boolean,
+    hasAccessibilityPermission: Boolean,
+    hasOverlayPermission: Boolean,
+    isRecordingActive: Boolean,
+    onOpenGuide: () -> Unit,
+    onGoToRecorder: () -> Unit
+) {
     val recordings by viewModel.recordings.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedSourceFilter by viewModel.selectedSourceFilter.collectAsState()
@@ -722,9 +750,12 @@ fun RecordingsListTab(viewModel: CallRecorderViewModel) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Horizontal filter tags
+        // Horizontal filter tags — scrollable so all five chips stay
+        // reachable (never squeezed/overlapped) on narrow screens.
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             sourceFilters.forEach { filter ->
@@ -752,7 +783,18 @@ fun RecordingsListTab(viewModel: CallRecorderViewModel) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Service Status Card (Directly matches "Service Status Card" in Design HTML)
+        // Service Status Card — reflects the REAL permission/recording
+        // state. A hardcoded "active" label here hid broken auto-record
+        // setups; the card now names exactly what is missing + deep-links
+        // to the guide tab.
+        val missingPermissions = buildList {
+            if (!hasMicPermission) add("الميكروفون")
+            if (!hasPhoneStatePermission) add("حالة الهاتف")
+            if (!hasAccessibilityPermission) add("إمكانية الوصول")
+            if (!hasOverlayPermission) add("الظهور فوق التطبيقات")
+        }
+        val statusReady = missingPermissions.isEmpty()
+        val statusColor = if (statusReady || isRecordingActive) HighDensityPrimary else MicRecordingColor
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -765,7 +807,10 @@ fun RecordingsListTab(viewModel: CallRecorderViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -774,26 +819,53 @@ fun RecordingsListTab(viewModel: CallRecorderViewModel) {
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(HighDensityPrimary)
+                                .background(statusColor)
                         )
                         Text(
-                            text = "الخدمة نشطة",
+                            text = when {
+                                isRecordingActive -> "جارٍ تسجيل مكالمة الآن"
+                                statusReady -> "الخدمة نشطة"
+                                else -> "الخدمة غير مفعلة"
+                            },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = HighDensityPrimary
+                            color = statusColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     Text(
-                        text = "نظام التسجيل الذكي يعمل",
+                        text = when {
+                            isRecordingActive -> "يتم حفظ الصوت وسيظهر في القائمة عند انتهاء المكالمة"
+                            statusReady -> "نظام التسجيل الذكي يعمل"
+                            else -> "التسجيل التلقائي متوقف"
+                        },
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = HighDensityOnAccentContainer
                     )
                     Text(
-                        text = "تم منح صلاحيات Accessibility و Overlay بنجاح",
+                        text = if (statusReady) "التسجيل التلقائي يعمل عند ورود المكالمات"
+                        else "المفقود: ${missingPermissions.joinToString("، ")}",
                         fontSize = 11.sp,
                         color = HighDensityOnAccentContainer.copy(alpha = 0.7f)
                     )
+                    if (!statusReady) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = onOpenGuide,
+                            colors = ButtonDefaults.buttonColors(containerColor = HighDensityPrimary),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                "إكمال الإعداد",
+                                color = com.example.ui.theme.HighDensityOnPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
                 Box(
                     modifier = Modifier
@@ -802,9 +874,9 @@ fun RecordingsListTab(viewModel: CallRecorderViewModel) {
                         .padding(10.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Active",
-                        tint = HighDensityPrimary,
+                        imageVector = if (statusReady || isRecordingActive) Icons.Default.Check else Icons.Default.Info,
+                        contentDescription = "Status",
+                        tint = statusColor,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -833,6 +905,19 @@ fun RecordingsListTab(viewModel: CallRecorderViewModel) {
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = onGoToRecorder,
+                        colors = ButtonDefaults.buttonColors(containerColor = HighDensityPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "تسجيل مقطع تجريبي",
+                            color = com.example.ui.theme.HighDensityOnPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         } else {
@@ -954,7 +1039,10 @@ fun RecordingItemCard(
                         text = recording.title,
                         color = HighDensityText,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = formatDuration(recording.durationSec),
@@ -971,8 +1059,13 @@ fun RecordingItemCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Source and direction details
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Source and direction details — weight(1f) so the
+                    // badges never collide with labels on narrow screens
+                    // (SpaceBetween with overflow otherwise overlaps).
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Text(
                             text = "$platformLabel • ",
                             color = HighDensitySubText,
@@ -1017,7 +1110,13 @@ fun RecordingItemCard(
                                 "سلبي" -> MicRecordingColor
                                 else -> InboundCallColor
                             }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                                 Box(
                                     modifier = Modifier
                                         .size(6.dp)
@@ -1282,7 +1381,13 @@ fun RecorderAndSimTab(
                             .padding(14.dp)
                     ) {
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                                 Icon(
                                     imageVector = Icons.Default.Info,
                                     contentDescription = "Tip Icon",
@@ -1395,7 +1500,13 @@ fun PermissionsGuideTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Mic,
                                 contentDescription = "Mic",
@@ -1431,7 +1542,13 @@ fun PermissionsGuideTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Call,
                                 contentDescription = "Phone State",
@@ -1467,7 +1584,13 @@ fun PermissionsGuideTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Call Log",
@@ -1503,7 +1626,13 @@ fun PermissionsGuideTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Notifications",
@@ -1539,7 +1668,13 @@ fun PermissionsGuideTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = "Battery Optimization",
@@ -1576,7 +1711,13 @@ fun PermissionsGuideTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = "Overlay Permission",
@@ -1613,7 +1754,13 @@ fun PermissionsGuideTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // weight(1f): the label column must shrink instead of
+                        // colliding with the status badge on narrow screens
+                        // (SpaceBetween with overflow otherwise overlaps).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Accessibility Permission",
@@ -1640,6 +1787,45 @@ fun PermissionsGuideTab(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Auto-record master switch. Both auto-start triggers
+                    // (phone-state receiver + accessibility in-call detection)
+                    // honor this flag; manual recording is unaffected.
+                    val guideContext = LocalContext.current
+                    var autoRecordEnabled by remember {
+                        mutableStateOf(com.example.services.AutoRecordPrefs.isEnabled(guideContext))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Call,
+                                contentDescription = "Auto record",
+                                tint = if (autoRecordEnabled) InboundCallColor else MicRecordingColor,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("التسجيل التلقائي للمكالمات", color = HighDensityText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("بدء التسجيل فور رصد شاشة الاتصال", color = HighDensitySubText, fontSize = 11.sp)
+                            }
+                        }
+                        Switch(
+                            checked = autoRecordEnabled,
+                            onCheckedChange = {
+                                autoRecordEnabled = it
+                                com.example.services.AutoRecordPrefs.setEnabled(guideContext, it)
+                            }
+                        )
                     }
 
                     if (!hasMicPermission || !hasNotificationPermission || !hasPhoneStatePermission || !hasCallLogPermission) {
@@ -1679,7 +1865,8 @@ fun PermissionsGuideTab(
                                 "تطبيق سجل المبتكر يتجاوز هذه القيود بالطرق الاحترافية التالية:\n" +
                                 "1. التقاط الصوت الخارجي والداخلي المتسرب عبر الميكروفون المتقدم (يفضل تشغيل مكبر الصوت/الاسبيكر في المكالمات لنتائج مذهلة).\n" +
                                 "2. محاكي المكالمات المدمج: يتيح لك محاكاة الاتصال وتفعيل التسجيل التلقائي فوراً لاختبار جودة الصوت وحفظ المكالمات بالتنصيف والاسم.\n" +
-                                "3. النسخ الذكي: استخدام نموذج الذكاء الاصطناعي الأكثر تقدماً Gemini 3.5 Flash لتحويل التسجيلات إلى نص وقراءتها فوراً مع التلخيص الذكي وتحديد اتجاه ونبرة الاتصال.",
+                                "3. النسخ الذكي: استخدام نموذج الذكاء الاصطناعي الأكثر تقدماً Gemini 3.5 Flash لتحويل التسجيلات إلى نص وقراءتها فوراً مع التلخيص الذكي وتحديد اتجاه ونبرة الاتصال.\n" +
+                                "4. التسجيل التلقائي: فعّل إمكانية الوصول والظهور فوق التطبيقات ليبدأ التسجيل وحده فور رصد شاشة الاتصال في أي مكالمة صادرة أو واردة، ويتوقف تلقائياً عند انتهائها.",
                         color = HighDensitySubText,
                         fontSize = 11.sp,
                         lineHeight = 18.sp
@@ -1839,7 +2026,11 @@ fun RecordingDetailsPanel(
                         text = "تفاصيل وتفريغ المكالمة",
                         color = HighDensityText,
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     IconButton(
                         onClick = { viewModel.deleteRecording(recording) },
@@ -2233,7 +2424,10 @@ fun AudioPlayerSection(
                     text = "قارئ المكالمات المسجلة",
                     color = HighDensityText,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 // Speed Selector

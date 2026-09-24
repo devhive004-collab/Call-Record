@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Window-state changes only: enough to spot the dialer in-call UI coming
+     to the foreground, without the battery cost (and Play-policy surface)
+     of typeAllMask + window content. NOTE: after updating this file the user
+     must toggle the service off/on once for the system to re-read it. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="false"
