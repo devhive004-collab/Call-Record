@@ -15,6 +15,7 @@ import android.provider.CallLog
 import android.provider.ContactsContract
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.MainActivity
 import com.example.data.database.Recording
 import com.example.data.database.RecordingDatabase
 import com.example.utils.AudioRecorderManager
@@ -34,6 +35,7 @@ class CallRecordingService : Service() {
     private val CHANNEL_ID = "call_recording_channel"
 
     private lateinit var recorderManager: AudioRecorderManager
+    private lateinit var overlayManager: RecordingOverlayManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var timerJob: Job? = null
     private var amplitudeJob: Job? = null
@@ -48,6 +50,11 @@ class CallRecordingService : Service() {
     override fun onCreate() {
         super.onCreate()
         recorderManager = AudioRecorderManager(this)
+        overlayManager = RecordingOverlayManager(this) {
+            // Overlay Stop tap runs on the main thread in our own
+            // foreground process — stopping directly is always allowed.
+            stopRecordingCall()
+        }
         createNotificationChannel()
     }
 
@@ -113,7 +120,11 @@ class CallRecordingService : Service() {
         }
 
         val prefix = if (direction == "INBOUND") "call_in" else "call_out"
-        
+
+        // Floating in-call pill (timer/stop) over the dialer. No-op without
+        // the overlay permission — recording continues notification-only.
+        overlayManager.show()
+
         serviceScope.launch {
             // Delay to allow the dialer's audio routing to settle
             delay(1500)
@@ -215,6 +226,10 @@ class CallRecordingService : Service() {
         CallStateTracker.activeFilePath.value = null
         CallStateTracker.amplitudeList.value = emptyList()
         CallStateTracker.direction.value = direction
+
+        // Recording ended — drop the floating pill immediately (the DB
+        // insert below is async and must not keep UI on screen).
+        overlayManager.hide()
 
         if (result.file != null && result.file.exists() && result.file.length() > 0L && duration > 0) {
             serviceScope.launch {
@@ -340,6 +355,19 @@ class CallRecordingService : Service() {
             android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // Stop action must open an Activity, not the service directly:
+        // Android 12+ bans notification trampolines to services/receivers.
+        // MainActivity consumes the action while foregrounded (always
+        // allowed to stop the service from there).
+        val stopIntent = Intent(this, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_STOP_SERVICE_RECORDING
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val stopPendingIntent = android.app.PendingIntent.getActivity(
+            this, 1, stopIntent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("مسجل المكالمات الذكي نشط")
             .setContentText("جاري تسجيل المكالمة مع: $callerName تلقائياً...")
@@ -348,6 +376,11 @@ class CallRecordingService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "إيقاف وحفظ",
+                stopPendingIntent
+            )
             .build()
     }
 
@@ -396,6 +429,7 @@ class CallRecordingService : Service() {
 
     override fun onDestroy() {
         stopTimers()
+        overlayManager.hide()
         try {
             // Best-effort: never leak a running MediaRecorder if the OS kills us.
             if (CallStateTracker.isRecording.value) {

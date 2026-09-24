@@ -159,8 +159,15 @@ class MainActivity : ComponentActivity() {
          * now that the app is in the foreground (mic always allowed here). */
         const val ACTION_TAP_TO_RECORD = "com.example.ACTION_TAP_TO_RECORD"
 
+        /** Fired by the recording notification's Stop action (notification
+         * taps may only open activities on Android 12+, never services). */
+        const val ACTION_STOP_SERVICE_RECORDING = "com.example.ACTION_STOP_SERVICE_RECORDING"
+
         @Volatile
         var tapToRecordPending = false
+
+        @Volatile
+        var stopServiceRecordingPending = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -193,8 +200,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun consumeTapIntent(intent: Intent?) {
-        if (intent?.action == ACTION_TAP_TO_RECORD) {
-            tapToRecordPending = true
+        when (intent?.action) {
+            ACTION_TAP_TO_RECORD -> tapToRecordPending = true
+            ACTION_STOP_SERVICE_RECORDING -> stopServiceRecordingPending = true
         }
     }
 }
@@ -263,6 +271,24 @@ fun SajilAppMainScreen(
             ) {
                 viewModel.startCallTapRecording()
                 selectedTab = 0
+            }
+        }
+        // Notification Stop action: app is foregrounded by the tap, so
+        // stopping the service directly is always allowed here.
+        if (MainActivity.stopServiceRecordingPending) {
+            MainActivity.stopServiceRecordingPending = false
+            if (isServiceRecording) {
+                try {
+                    val stopIntent = Intent(
+                        context,
+                        com.example.services.CallRecordingService::class.java
+                    ).apply {
+                        action = com.example.services.CallRecordingService.ACTION_STOP_RECORDING
+                    }
+                    context.startService(stopIntent)
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Failed to stop recording service", e)
+                }
             }
         }
     }
