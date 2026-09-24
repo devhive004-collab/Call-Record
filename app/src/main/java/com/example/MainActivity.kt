@@ -154,8 +154,18 @@ import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** Fired by the accessibility fallback notification: start recording
+         * now that the app is in the foreground (mic always allowed here). */
+        const val ACTION_TAP_TO_RECORD = "com.example.ACTION_TAP_TO_RECORD"
+
+        @Volatile
+        var tapToRecordPending = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        consumeTapIntent(intent)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -173,6 +183,18 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeTapIntent(intent)
+    }
+
+    private fun consumeTapIntent(intent: Intent?) {
+        if (intent?.action == ACTION_TAP_TO_RECORD) {
+            tapToRecordPending = true
         }
     }
 }
@@ -225,6 +247,25 @@ fun SajilAppMainScreen(
     val serviceAmplitudeList by com.example.services.CallStateTracker.amplitudeList.collectAsState()
     val servicePlatform by com.example.services.CallStateTracker.platform.collectAsState()
     val serviceDirection by com.example.services.CallStateTracker.direction.collectAsState()
+
+    // Fallback path: the accessibility "call in progress" notification brings
+    // the app to the foreground (where mic access is always allowed) — start
+    // recording immediately on arrival.
+    LaunchedEffect(Unit) {
+        if (MainActivity.tapToRecordPending) {
+            MainActivity.tapToRecordPending = false
+            val micGranted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (com.example.services.AutoRecordPrefs.isEnabled(context) &&
+                micGranted && !isRecordingActive &&
+                !isServiceRecording && activeSimulatedCall == null
+            ) {
+                viewModel.startCallTapRecording()
+                selectedTab = 0
+            }
+        }
+    }
 
     // Permissions check
     var hasMicPermission by remember {
@@ -1826,6 +1867,48 @@ fun PermissionsGuideTab(
                                 com.example.services.AutoRecordPrefs.setEnabled(guideContext, it)
                             }
                         )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // On-device auto-record diagnostics: proves whether the
+                    // accessibility detector is alive and what it last saw.
+                    // If auto-record still misses calls, read these three
+                    // lines (after opening the phone app once) when reporting.
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = HighDensityBg),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, HighDensityBorder, RoundedCornerShape(12.dp))
+                    ) {
+                        val a11yDetector = com.example.services.CallRecordingAccessibilityService
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "تشخيص الكاشف التلقائي",
+                                color = HighDensityText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "الحالة: ${if (hasAccessibilityPermission) "مفعّل ويستمع لنوافذ الاتصال" else "مغلق — فعّله من الأعلى ثم أعد فتح التطبيق"}",
+                                color = HighDensitySubText,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                "آخر نافذة مرصودة: ${a11yDetector.lastWindowPkg ?: "لا شيء بعد — افتح تطبيق الهاتف ثم عُد هنا"}",
+                                color = HighDensitySubText,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                "آخر محاولة بدء: ${a11yDetector.lastTriggerResult}",
+                                color = HighDensitySubText,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
 
                     if (!hasMicPermission || !hasNotificationPermission || !hasPhoneStatePermission || !hasCallLogPermission) {

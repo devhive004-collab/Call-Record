@@ -8,6 +8,7 @@ import com.example.data.database.Recording
 import com.example.data.database.RecordingDatabase
 import com.example.data.gemini.GeminiClient
 import com.example.data.repository.RecordingRepository
+import com.example.services.CallStateTracker
 import com.example.utils.AudioPlayerManager
 import com.example.utils.AudioRecorderManager
 import kotlinx.coroutines.Dispatchers
@@ -142,6 +143,14 @@ class CallRecorderViewModel(
     private var recordingTimerJob: Job? = null
     private var amplitudeJob: Job? = null
 
+    // Foreground tap-to-record fallback: started from MainActivity when the
+    // user taps the "call in progress" notification (background auto-start
+    // blocked by the OS). stopMicRecording() branches on [isTapRecording]
+    // to file it as a cellular call instead of a mic memo.
+    private var isTapRecording = false
+    private var tapTitle = "مكالمة"
+    private var tapDirection = "INBOUND"
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             // Seed sample data for high-polish first load experience
@@ -260,14 +269,17 @@ class CallRecorderViewModel(
 
                 val file = result.file
                 if (file != null && file.exists() && file.length() > 0L && result.durationSec > 0) {
+                    val wasTap = isTapRecording
+                    isTapRecording = false
                     val newRecording = Recording(
-                        title = "تسجيل صوتي عابر",
-                        source = "MIC",
-                        direction = "MEMO",
+                        title = if (wasTap) tapTitle else "تسجيل صوتي عابر",
+                        source = if (wasTap) "CELLULAR" else "MIC",
+                        direction = if (wasTap) tapDirection else "MEMO",
                         durationSec = result.durationSec,
                         filePath = file.absolutePath,
                         timestamp = System.currentTimeMillis(),
-                        notes = "تسجيل شخصي من الميكروفون."
+                        notes = if (wasTap) "مكالمة مسجلة عبر زر بدء التسجيل."
+                        else "تسجيل شخصي من الميكروفون."
                     )
                     val id = withContext(Dispatchers.IO) { repository.insert(newRecording) }
                     val insertedRec = withContext(Dispatchers.IO) { repository.getRecordingById(id) }
@@ -281,8 +293,39 @@ class CallRecorderViewModel(
         }
     }
 
-    // SIMULATED CALL ACTIONS
-    fun initiateQuickTestCall() {
+    /**
+     * Foreground fallback for blocked background auto-start: the user taps
+     * the "call in progress" notification, the app comes to the foreground
+     * (where mic access is always allowed), and this starts recording with
+     * call metadata. Stopped via [stopMicRecording] (same stop button).
+     */
+    fun startCallTapRecording() {
+        viewModelScope.launch {
+            recordingMutex.withLock {
+                if (_isRecordingActive.value) return@withLock
+                val pendingFresh =
+                    System.currentTimeMillis() - CallStateTracker.pendingAtMillis < 60_000L
+                val number = if (pendingFresh) CallStateTracker.pendingNumber else null
+                val file = withContext(Dispatchers.IO) {
+                    recorder.startRecording("call_tap")
+                }
+                if (file != null && file.exists()) {
+                    tapTitle = number?.takeIf { it.isNotBlank() } ?: "مكالمة"
+                    tapDirection =
+                        if (pendingFresh) CallStateTracker.pendingDirection else "INBOUND"
+                    isTapRecording = true
+                    _isRecordingActive.value = true
+                    _activeRecordDurationSec.value = 0
+                    _amplitudeList.value = emptyList()
+                    startRecordingTimers()
+                } else {
+                    Log.e(TAG, "Tap-to-record failed to start (null file)")
+                }
+            }
+        }
+    }
+
+    // SIMULATED CALL ACTIONS    fun initiateQuickTestCall() {
         initiateSimulatedCall(
             callerName = "مكالمة تجريبية تلقائية",
             platform = "CELLULAR",
