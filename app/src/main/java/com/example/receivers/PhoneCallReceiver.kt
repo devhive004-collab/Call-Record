@@ -17,6 +17,18 @@ class PhoneCallReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        // Capture outgoing number via NEW_OUTGOING_CALL (requires PROCESS_OUTGOING_CALLS).
+        // PHONE_STATE OFFHOOK does not carry the outgoing number on many devices.
+        if (intent.action == Intent.ACTION_NEW_OUTGOING_CALL) {
+            val outgoing = intent.getStringExtra(Intent.EXTRA_PHONE_NUMBER)
+            if (outgoing != null) {
+                savedNumber = outgoing
+            }
+            isIncoming = false
+            Log.d(TAG, "New outgoing call to $savedNumber")
+            return
+        }
+
         if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
 
         val stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
@@ -33,20 +45,10 @@ class PhoneCallReceiver : BroadcastReceiver() {
                 isIncoming = true
                 lastState = TelephonyManager.EXTRA_STATE_RINGING
                 Log.d(TAG, "Ringing... Incoming call detected.")
-                
-                // Auto-launch MainActivity so the app wakes up and appears on the screen!
-                try {
-                    val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    }
-                    if (launchIntent != null) {
-                        context.startActivity(launchIntent)
-                        Log.d(TAG, "MainActivity launched successfully on RINGING")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to launch main activity on RINGING", e)
-                }
+                // NOTE: Do NOT launch MainActivity from background here.
+                // Background activity starts are blocked on Android 10+ and
+                // interrupt the dialer. The recording service posts a
+                // notification instead; user taps it to open the app.
             }
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                 // Call answered or outgoing call placed
@@ -65,17 +67,10 @@ class PhoneCallReceiver : BroadcastReceiver() {
                     } else {
                         context.startService(serviceIntent)
                     }
-
-                    // Auto-launch MainActivity so the app wakes up and connects to the active call automatically!
-                    val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    }
-                    if (launchIntent != null) {
-                        context.startActivity(launchIntent)
-                    }
+                    // NOTE: Do NOT start MainActivity from background (Android 10+
+                    // background-start restriction). See RINGING branch above.
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start call recording service or wake up main activity", e)
+                    Log.e(TAG, "Failed to start call recording service (bg FGS restriction?)", e)
                 }
 
                 lastState = TelephonyManager.EXTRA_STATE_OFFHOOK
@@ -86,7 +81,14 @@ class PhoneCallReceiver : BroadcastReceiver() {
                     action = CallRecordingService.ACTION_STOP_RECORDING
                 }
                 try {
-                    context.startService(serviceIntent)
+                    // Must use startForegroundService on O+ even for STOP, because
+                    // the target is a foreground service. startService() throws
+                    // IllegalStateException on API 26+.
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to stop recording service", e)
                 }

@@ -1,36 +1,48 @@
 package com.example.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// High Density Theme Color Palette
-val HighDensityBg: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF141419) else Color(0xFFF7F9FF)
+// Single source of truth: plain vals per theme. Previous @Composable getters
+// called isSystemInDarkTheme() internally, creating a second source of truth
+// that disagreed with Theme.kt's darkTheme param (mixed light/dark scheme).
+// Screens should prefer MaterialTheme.colorScheme; these vals back Theme.kt
+// and legacy direct usages (dark-first app).
 
-val HighDensityText: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFE2E2E6) else Color(0xFF1B1B1F)
+// Dark palette
+val HighDensityBgDark = Color(0xFF141419)
+val HighDensityTextDark = Color(0xFFE2E2E6)
+val HighDensityPrimaryDark = Color(0xFF80BFFF)
+val HighDensityOnPrimaryDark = Color(0xFF003258)
+val HighDensityAccentContainerDark = Color(0xFF00497D)
+val HighDensityOnAccentContainerDark = Color(0xFFD1E4FF)
+val HighDensityBorderDark = Color(0xFF44474E)
+val HighDensitySubTextDark = Color(0xFFAAAAB4)
+val HighDensityCardBgDark = Color(0xFF1E1E22)
+val HighDensitySurfaceDark = Color(0xFF1E1E22)
 
-val HighDensityPrimary: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF80BFFF) else Color(0xFF0061A4)
+// Light palette
+val HighDensityBgLight = Color(0xFFF7F9FF)
+val HighDensityTextLight = Color(0xFF1B1B1F)
+val HighDensityPrimaryLight = Color(0xFF0061A4)
+val HighDensityOnPrimaryLight = Color.White
+val HighDensityAccentContainerLight = Color(0xFFD1E4FF)
+val HighDensityOnAccentContainerLight = Color(0xFF001D36)
+val HighDensityBorderLight = Color(0xFFDDE2F0)
+val HighDensitySubTextLight = Color(0xFF44474E)
+val HighDensityCardBgLight = Color.White
+val HighDensitySurfaceLight = Color.White
 
-val HighDensityOnPrimary: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF003258) else Color.White
-
-val HighDensityAccentContainer: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF00497D) else Color(0xFFD1E4FF)
-
-val HighDensityOnAccentContainer: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFD1E4FF) else Color(0xFF001D36)
-
-val HighDensityBorder: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF44474E) else Color(0xFFDDE2F0)
-
-val HighDensitySubText: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFAAAAB4) else Color(0xFF44474E)
-
-val HighDensityCardBg: Color
-    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF1E1E22) else Color.White
+// Legacy aliases (dark-first) — keep compiling for existing screens.
+// New code should use MaterialTheme.colorScheme instead.
+val HighDensityBg = HighDensityBgDark
+val HighDensityText = HighDensityTextDark
+val HighDensityPrimary = HighDensityPrimaryDark
+val HighDensityOnPrimary = HighDensityOnPrimaryDark
+val HighDensityAccentContainer = HighDensityAccentContainerDark
+val HighDensityOnAccentContainer = HighDensityOnAccentContainerDark
+val HighDensityBorder = HighDensityBorderDark
+val HighDensitySubText = HighDensitySubTextDark
+val HighDensityCardBg = HighDensityCardBgDark
 
 val SoftGray = Color(0xFF8E8E93)
 val WhiteIce = Color(0xFFF5F5F7)

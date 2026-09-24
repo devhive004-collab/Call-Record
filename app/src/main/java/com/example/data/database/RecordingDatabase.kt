@@ -5,17 +5,22 @@ import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Delete
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
+import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
-@Entity(tableName = "recordings")
+@Entity(
+    tableName = "recordings",
+    indices = [Index(value = ["timestamp"])]
+)
 data class Recording(
-    @androidx.room.PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val title: String,
     val source: String,               // "CELLULAR", "WHATSAPP", "MESSENGER", "MIC"
     val direction: String,            // "INBOUND", "OUTBOUND", "MEMO"
@@ -48,13 +53,27 @@ interface RecordingDao {
     suspend fun deleteRecording(recording: Recording)
 
     @Query("DELETE FROM recordings WHERE id = :id")
-    suspend fun deleteRecordingById(id: Long)
+    suspend fun deleteRecordingById(id: Long): Int
 
-    @Query("SELECT * FROM recordings WHERE title LIKE '%' || :query || '%' OR transcript LIKE '%' || :query || '%' OR notes LIKE '%' || :query || '%' ORDER BY timestamp DESC")
+    @Query("DELETE FROM recordings WHERE filePath LIKE '%' || :fragment || '%' ESCAPE '\\'")
+    suspend fun deleteByPathFragment(fragment: String): Int
+
+    @Query(
+        "SELECT * FROM recordings WHERE " +
+        "title LIKE '%' || :query || '%' ESCAPE '\\' OR " +
+        "transcript LIKE '%' || :query || '%' ESCAPE '\\' OR " +
+        "notes LIKE '%' || :query || '%' ESCAPE '\\' " +
+        "ORDER BY timestamp DESC"
+    )
     fun searchRecordings(query: String): Flow<List<Recording>>
 }
 
-@Database(entities = [Recording::class], version = 1, exportSchema = false)
+@Database(
+    entities = [Recording::class],
+    version = 2,
+    autoMigrations = [androidx.room.AutoMigration(from = 1, to = 2)],
+    exportSchema = true
+)
 abstract class RecordingDatabase : RoomDatabase() {
     abstract fun recordingDao(): RecordingDao
 
@@ -64,13 +83,14 @@ abstract class RecordingDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): RecordingDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     RecordingDatabase::class.java,
                     "sajil_recordings_db"
-                ).fallbackToDestructiveMigration().build()
-                INSTANCE = instance
-                instance
+                )
+                    // Never wipe user recordings on upgrade; use AutoMigration 1->2.
+                    // Add explicit Migration objects here for future schema changes.
+                    .build().also { INSTANCE = it }
             }
         }
     }

@@ -13,4 +13,17 @@ class ExampleUnitTest {
   fun addition_isCorrect() {
     assertEquals(4, 2 + 2)
   }
+
+  @Test
+  fun geminiMockPrefix_isDetected() {
+    assertTrue(
+      com.example.data.gemini.GeminiClient.isMockText(
+        "⚠️ يرجى إضافة مفتاح API الخاص بـ Gemini"
+      )
+    )
+    assertFalse(
+      com.example.data.gemini.GeminiClient.isMockText("المتصل: مرحبا")
+    )
+    assertFalse(com.example.data.gemini.GeminiClient.isMockText(null))
+  }
 }

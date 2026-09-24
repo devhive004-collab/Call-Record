@@ -17,17 +17,68 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
 
-class CallRecorderViewModel(application: Application) : AndroidViewModel(application) {
+class CallRecorderViewModel(
+    application: Application,
+    private val repository: RecordingRepository,
+    private val recorder: AudioRecorderManager,
+    private val player: AudioPlayerManager
+) : AndroidViewModel(application) {
     private val TAG = "CallRecorderVM"
-    private val database = RecordingDatabase.getDatabase(application)
-    private val repository = RecordingRepository(application, database.recordingDao())
-    
-    val recorderManager = AudioRecorderManager(application)
-    val playerManager = AudioPlayerManager(application)
+
+    // Compat constructor: resolves from SajilApplication container.
+    // New code should use Factory with explicit deps (testable).
+    constructor(application: Application) : this(
+        application,
+        (application as? com.example.SajilApplication)?.container?.repository
+            ?: RecordingRepository(
+                application,
+                RecordingDatabase.getDatabase(application).recordingDao()
+            ),
+        (application as? com.example.SajilApplication)?.container?.recorderManager
+            ?: AudioRecorderManager(application),
+        (application as? com.example.SajilApplication)?.container?.playerManager
+            ?: AudioPlayerManager(application)
+    )
+
+    // Kept for compat (UI calls via playRecording/seek wrappers).
+    // Prefer injected [recorder]/[player]; these delegate for now.
+    val recorderManager: AudioRecorderManager get() = recorder
+    val playerManager: AudioPlayerManager get() = player
+
+    class Factory(
+        private val app: Application,
+        private val repository: RecordingRepository? = null,
+        private val recorder: AudioRecorderManager? = null,
+        private val player: AudioPlayerManager? = null
+    ) : androidx.lifecycle.ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+            val container = (app as? com.example.SajilApplication)?.container
+            return CallRecorderViewModel(
+                app,
+                repository ?: container?.repository
+                    ?: RecordingRepository(
+                        app,
+                        RecordingDatabase.getDatabase(app).recordingDao()
+                    ),
+                recorder ?: container?.recorderManager ?: AudioRecorderManager(app),
+                player ?: container?.playerManager ?: AudioPlayerManager(app)
+            ) as T
+        }
+    }
+
+    private val recordingMutex = Mutex()
+    private val aiJobs = mutableMapOf<Long, Job>()
 
     // Filter states
     private val _searchQuery = MutableStateFlow("")
@@ -36,15 +87,17 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
     private val _selectedSourceFilter = MutableStateFlow("ALL") // ALL, CELLULAR, WHATSAPP, MESSENGER, MIC
     val selectedSourceFilter = _selectedSourceFilter.asStateFlow()
 
-    // Recording list flow combined with filters
-    private val _recordings = MutableStateFlow<List<Recording>>(emptyList())
+    // Recording list flow combined with filters.
+    // Search input is debounced + distinct so each keystroke does not re-filter
+    // the full table; source filter is a cheap equality check.
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
     val recordings: StateFlow<List<Recording>> = combine(
         repository.allRecordings,
-        _searchQuery,
+        _searchQuery.debounce(300).distinctUntilChanged(),
         _selectedSourceFilter
     ) { rawList, query, filter ->
         var list = rawList
-        if (query.isNotEmpty()) {
+        if (query.isNotBlank()) {
             list = list.filter {
                 it.title.contains(query, ignoreCase = true) ||
                 (it.transcript ?: "").contains(query, ignoreCase = true) ||
@@ -52,7 +105,7 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
             }
         }
         if (filter != "ALL") {
-            list = list.filter { it.source.uppercase() == filter.uppercase() }
+            list = list.filter { it.source.equals(filter, ignoreCase = true) }
         }
         list
     }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
@@ -76,7 +129,7 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
     val aiOperationState = _aiOperationState.asStateFlow()
 
     // Active Player details (StateFlow from PlayerManager)
-    val playbackState = playerManager.playbackState
+    val playbackState = player.playbackState
 
     private val _playbackSpeed = MutableStateFlow(1.0f)
     val playbackSpeed = _playbackSpeed.asStateFlow()
@@ -93,6 +146,13 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch(Dispatchers.IO) {
             // Seed sample data for high-polish first load experience
             repository.prepopulateIfEmpty()
+            // Drop phantom rows (missing/0-byte files from restores or
+            // manual deletion) so history never shows unplayable corpses.
+            try {
+                repository.cleanupMissingFiles()
+            } catch (e: Exception) {
+                Log.e(TAG, "Startup sweep failed", e)
+            }
         }
     }
 
@@ -106,35 +166,38 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun selectRecording(recording: Recording?) {
+        val current = _selectedRecording.value
         _selectedRecording.value = recording
-        // Always stop any current audio playback to prevent state leakage
-        playerManager.stopAudio()
+        // Avoid interrupting playback on rotation / re-select of same item.
+        if (current?.id != recording?.id) {
+            player.stopAudio()
+        }
     }
 
     // Audio Playback Actions
     fun playRecording(recording: Recording) {
-        playerManager.playAudio(recording.filePath, _playbackSpeed.value)
+        player.playAudio(recording.filePath, _playbackSpeed.value)
     }
 
     fun pausePlayback() {
-        playerManager.pauseAudio()
+        player.pauseAudio()
     }
 
     fun resumePlayback() {
-        playerManager.resumeAudio()
+        player.resumeAudio()
     }
 
     fun stopPlayback() {
-        playerManager.stopAudio()
+        player.stopAudio()
     }
 
     fun seekPlaybackTo(positionMs: Int) {
-        playerManager.seekTo(positionMs)
+        player.seekTo(positionMs)
     }
 
     fun updatePlaybackSpeed(speed: Float) {
         _playbackSpeed.value = speed
-        playerManager.setPlaybackSpeed(speed)
+        player.setPlaybackSpeed(speed)
     }
 
     // Delete recording
@@ -144,8 +207,8 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
                 _selectedRecording.value = null
             }
             // Stop playing if deleting current playing item
-            if (playerManager.getCurrentPlayingPath() == recording.filePath) {
-                playerManager.stopAudio()
+            if (player.getCurrentPlayingPath() == recording.filePath) {
+                player.stopAudio()
             }
             repository.delete(recording)
         }
@@ -165,44 +228,54 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    // Recorder Actions
+    // Recorder Actions — serialized by Mutex so double-tap cannot start
+    // two MediaRecorders. Blocking recorder calls run on IO; UI state
+    // updates are posted back on Main.
     fun startMicRecording() {
-        if (_isRecordingActive.value) return
-        
-        viewModelScope.launch(Dispatchers.IO) {
-            val file = recorderManager.startRecording("sajil_mic")
-            if (file != null) {
-                _isRecordingActive.value = true
-                _activeRecordDurationSec.value = 0
-                _amplitudeList.value = emptyList()
-                startRecordingTimers()
+        viewModelScope.launch {
+            recordingMutex.withLock {
+                if (_isRecordingActive.value) return@withLock
+                val file = withContext(Dispatchers.IO) {
+                    recorder.startRecording("sajil_mic")
+                }
+                if (file != null && file.exists() && file.length() >= 0L) {
+                    _isRecordingActive.value = true
+                    _activeRecordDurationSec.value = 0
+                    _amplitudeList.value = emptyList()
+                    startRecordingTimers()
+                } else {
+                    Log.e(TAG, "Mic recording failed to start (null file)")
+                }
             }
         }
     }
 
     fun stopMicRecording() {
-        if (!_isRecordingActive.value) return
+        viewModelScope.launch {
+            recordingMutex.withLock {
+                if (!_isRecordingActive.value) return@withLock
+                stopRecordingTimers()
+                val result = withContext(Dispatchers.IO) { recorder.stopRecording() }
+                _isRecordingActive.value = false
 
-        viewModelScope.launch(Dispatchers.IO) {
-            stopRecordingTimers()
-            val result = recorderManager.stopRecording()
-            _isRecordingActive.value = false
-
-            val file = result.file
-            if (file != null && file.exists()) {
-                val newRecording = Recording(
-                    title = "تسجيل صوتي عابر",
-                    source = "MIC",
-                    direction = "MEMO",
-                    durationSec = result.durationSec,
-                    filePath = file.absolutePath,
-                    timestamp = System.currentTimeMillis(),
-                    notes = "تسجيل شخصي من الميكروفون."
-                )
-                val id = repository.insert(newRecording)
-                val insertedRec = repository.getRecordingById(id)
-                if (insertedRec != null) {
-                    _selectedRecording.value = insertedRec
+                val file = result.file
+                if (file != null && file.exists() && file.length() > 0L && result.durationSec > 0) {
+                    val newRecording = Recording(
+                        title = "تسجيل صوتي عابر",
+                        source = "MIC",
+                        direction = "MEMO",
+                        durationSec = result.durationSec,
+                        filePath = file.absolutePath,
+                        timestamp = System.currentTimeMillis(),
+                        notes = "تسجيل شخصي من الميكروفون."
+                    )
+                    val id = withContext(Dispatchers.IO) { repository.insert(newRecording) }
+                    val insertedRec = withContext(Dispatchers.IO) { repository.getRecordingById(id) }
+                    if (insertedRec != null) {
+                        _selectedRecording.value = insertedRec
+                    }
+                } else {
+                    Log.w(TAG, "Mic recording produced no valid file, discarding")
                 }
             }
         }
@@ -218,73 +291,81 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun initiateSimulatedCall(callerName: String, platform: String, isInbound: Boolean) {
-        if (_activeSimulatedCall.value != null || _isRecordingActive.value) return
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val prefix = "sim_${platform.lowercase()}_${if (isInbound) "in" else "out"}"
-            val file = recorderManager.startRecording(prefix)
-            if (file != null) {
-                _activeSimulatedCall.value = SimulatedCall(
-                    callerName = callerName,
-                    platform = platform,
-                    isInbound = isInbound,
-                    filePath = file.absolutePath,
-                    startTime = System.currentTimeMillis()
-                )
-                _activeRecordDurationSec.value = 0
-                _amplitudeList.value = emptyList()
-                startRecordingTimers()
+        viewModelScope.launch {
+            recordingMutex.withLock {
+                if (_activeSimulatedCall.value != null || _isRecordingActive.value) return@withLock
+                val prefix = "sim_${platform.lowercase()}_${if (isInbound) "in" else "out"}"
+                val file = withContext(Dispatchers.IO) { recorder.startRecording(prefix) }
+                if (file != null) {
+                    _activeSimulatedCall.value = SimulatedCall(
+                        callerName = callerName,
+                        platform = platform,
+                        isInbound = isInbound,
+                        filePath = file.absolutePath,
+                        startTime = System.currentTimeMillis()
+                    )
+                    _activeRecordDurationSec.value = 0
+                    _amplitudeList.value = emptyList()
+                    startRecordingTimers()
+                }
             }
         }
     }
 
     fun endSimulatedCall() {
-        val activeCall = _activeSimulatedCall.value ?: return
+        viewModelScope.launch {
+            recordingMutex.withLock {
+                val activeCall = _activeSimulatedCall.value ?: return@withLock
+                stopRecordingTimers()
+                val result = withContext(Dispatchers.IO) { recorder.stopRecording() }
+                _activeSimulatedCall.value = null
 
-        viewModelScope.launch(Dispatchers.IO) {
-            stopRecordingTimers()
-            val result = recorderManager.stopRecording()
-            _activeSimulatedCall.value = null
-
-            val file = result.file
-            if (file != null) {
-                val newRecording = Recording(
-                    title = activeCall.callerName,
-                    source = activeCall.platform,
-                    direction = if (activeCall.isInbound) "INBOUND" else "OUTBOUND",
-                    durationSec = result.durationSec,
-                    filePath = file.absolutePath,
-                    timestamp = System.currentTimeMillis(),
-                    notes = "مكالمة مسجلة من تطبيق ${activeCall.platform}."
-                )
-                val id = repository.insert(newRecording)
-                val insertedRec = repository.getRecordingById(id)
-                if (insertedRec != null) {
-                    _selectedRecording.value = insertedRec
+                val file = result.file
+                if (file != null && file.exists() && file.length() > 0L && result.durationSec > 0) {
+                    val newRecording = Recording(
+                        title = activeCall.callerName,
+                        source = activeCall.platform,
+                        direction = if (activeCall.isInbound) "INBOUND" else "OUTBOUND",
+                        durationSec = result.durationSec,
+                        filePath = file.absolutePath,
+                        timestamp = System.currentTimeMillis(),
+                        notes = "مكالمة مسجلة من تطبيق ${activeCall.platform}."
+                    )
+                    val id = withContext(Dispatchers.IO) { repository.insert(newRecording) }
+                    val insertedRec = withContext(Dispatchers.IO) { repository.getRecordingById(id) }
+                    if (insertedRec != null) {
+                        _selectedRecording.value = insertedRec
+                    }
+                } else {
+                    Log.w(TAG, "Simulated call produced no valid file, discarding")
                 }
             }
         }
     }
 
     private fun startRecordingTimers() {
+        recordingTimerJob?.cancel()
         recordingTimerJob = viewModelScope.launch(Dispatchers.Main) {
-            while (true) {
+            while (isActive) {
                 delay(1000)
                 _activeRecordDurationSec.value += 1
             }
         }
 
-        amplitudeJob = viewModelScope.launch(Dispatchers.Main) {
-            while (true) {
-                delay(100)
-                val amp = recorderManager.getAmplitude()
+        amplitudeJob?.cancel()
+        // Amplitude polls MediaRecorder (Binder) — keep it off Main to avoid
+        // 10Hz UI jank. StateFlow is thread-safe; Compose collects on Main.
+        amplitudeJob = viewModelScope.launch(Dispatchers.IO) {
+            val window = ArrayDeque<Float>(51)
+            while (isActive) {
+                delay(200)
+                val amp = try {
+                    recorder.getAmplitude()
+                } catch (_: Exception) { 0 }
                 val normalized = (amp.toFloat() / 32767f).coerceIn(0f, 1f)
-                val currentList = _amplitudeList.value.toMutableList()
-                if (currentList.size > 50) {
-                    currentList.removeAt(0)
-                }
-                currentList.add(normalized)
-                _amplitudeList.value = currentList
+                if (window.size >= 50) window.removeFirst()
+                window.addLast(normalized)
+                _amplitudeList.value = window.toList()
             }
         }
     }
@@ -296,10 +377,12 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
         amplitudeJob = null
     }
 
-    // GEMINI AI TRANSCRIPTION & ANALYSIS ACTIONS
+    // GEMINI AI TRANSCRIPTION & ANALYSIS ACTIONS — one job per recording id,
+    // last-write-wins clobber avoided by cancelling the previous job.
     fun transcribeRecording(recording: Recording) {
+        aiJobs[recording.id]?.cancel()
         _aiOperationState.value = AiOpState.Transcribing(recording.id)
-        viewModelScope.launch(Dispatchers.IO) {
+        aiJobs[recording.id] = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val transcript = GeminiClient.generateTranscript(
                     callerName = recording.title,
@@ -308,38 +391,51 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
                     userNotes = recording.notes,
                     audioFilePath = recording.filePath
                 )
-                
-                // Save to DB
-                val updated = recording.copy(
+
+                if (GeminiClient.isMockText(transcript)) {
+                    // Never persist the "add API key" warning as a real transcript,
+                    // and never auto-analyze it.
+                    _aiOperationState.value = AiOpState.Error("أضف مفتاح Gemini في الإعدادات أولاً")
+                    return@launch
+                }
+
+                // Re-fetch latest row: user may have edited notes while we waited.
+                val latest = repository.getRecordingById(recording.id) ?: recording
+                val updated = latest.copy(
                     isTranscribed = true,
                     transcript = transcript
                 )
                 repository.update(updated)
-                
+
                 // Update active selection if needed
                 if (_selectedRecording.value?.id == recording.id) {
                     _selectedRecording.value = updated
                 }
 
-                _aiOperationState.value = AiOpState.Success("تم نسخ الصوت إلى نص بنجاح!")
-                
+                _aiOperationState.value = AiOpState.Success(recording.id, "تم نسخ الصوت إلى نص بنجاح!")
+
                 // Auto transition to analyze
                 analyzeRecording(updated)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed transcription", e)
-                _aiOperationState.value = AiOpState.Error("خطأ أثناء تحويل الصوت: ${e.message}")
+                _aiOperationState.value = AiOpState.Error("خطأ أثناء تحويل الصوت")
             }
         }
     }
 
     fun analyzeRecording(recording: Recording) {
-        val transcript = recording.transcript ?: return
-        _aiOperationState.value = AiOpState.Analyzing(recording.id)
-        viewModelScope.launch(Dispatchers.IO) {
+        // Resolve fresh transcript: caller may pass a stale copy.
+        aiJobs[recording.id]?.cancel()
+        aiJobs[recording.id] = viewModelScope.launch(Dispatchers.IO) {
+            val latest = repository.getRecordingById(recording.id) ?: recording
+            val transcript = latest.transcript ?: recording.transcript ?: return@launch
+            if (GeminiClient.isMockText(transcript)) return@launch
+            _aiOperationState.value = AiOpState.Analyzing(recording.id)
             try {
                 val analysisResult = GeminiClient.analyzeTranscript(transcript)
-                
-                val updated = recording.copy(
+
+                val fresh = repository.getRecordingById(recording.id) ?: latest
+                val updated = fresh.copy(
                     summary = analysisResult.summary,
                     sentiment = analysisResult.sentiment,
                     importantPoints = analysisResult.importantPoints
@@ -350,10 +446,10 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
                     _selectedRecording.value = updated
                 }
 
-                _aiOperationState.value = AiOpState.Success("تم تحليل المكالمة وتلخيصها بالذكاء الاصطناعي!")
+                _aiOperationState.value = AiOpState.Success(recording.id, "تم تحليل المكالمة وتلخيصها بالذكاء الاصطناعي!")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed analysis", e)
-                _aiOperationState.value = AiOpState.Error("خطأ أثناء التحليل الذكي: ${e.message}")
+                _aiOperationState.value = AiOpState.Error("خطأ أثناء التحليل الذكي")
             }
         }
     }
@@ -364,7 +460,16 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
 
     override fun onCleared() {
         super.onCleared()
-        playerManager.stopAudio()
+        aiJobs.values.forEach { it.cancel() }
+        aiJobs.clear()
+        try {
+            if (_isRecordingActive.value || _activeSimulatedCall.value != null) {
+                recorder.stopRecording()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping recorder in onCleared", e)
+        }
+        player.release()
         stopRecordingTimers()
     }
 
@@ -380,7 +485,7 @@ class CallRecorderViewModel(application: Application) : AndroidViewModel(applica
         object Idle : AiOpState
         data class Transcribing(val id: Long) : AiOpState
         data class Analyzing(val id: Long) : AiOpState
-        data class Success(val msg: String) : AiOpState
+        data class Success(val id: Long, val msg: String) : AiOpState
         data class Error(val msg: String) : AiOpState
     }
 }

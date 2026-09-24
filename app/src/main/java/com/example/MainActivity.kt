@@ -103,6 +103,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.debounce
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -170,11 +173,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun SajilAppMainScreen(
     modifier: Modifier = Modifier,
-    viewModel: CallRecorderViewModel = viewModel()
+    viewModel: CallRecorderViewModel = viewModel(
+        factory = CallRecorderViewModel.Factory(
+            LocalContext.current.applicationContext as android.app.Application
+        )
+    )
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -182,9 +189,16 @@ fun SajilAppMainScreen(
     val prefs = remember { context.getSharedPreferences("sajil_prefs", Context.MODE_PRIVATE) }
     var geminiApiKey by remember { mutableStateOf(prefs.getString("gemini_api_key", "") ?: "") }
 
-    LaunchedEffect(geminiApiKey) {
-        prefs.edit().putString("gemini_api_key", geminiApiKey).apply()
-        com.example.data.gemini.GeminiClient.apiKey = geminiApiKey
+    // Debounced save: writing SharedPrefs on every keystroke causes churn.
+    // Collect once; snapshotFlow + debounce persists only after typing pauses.
+    LaunchedEffect(Unit) {
+        com.example.data.gemini.GeminiClient.setApiKey(geminiApiKey)
+        kotlinx.coroutines.flow.snapshotFlow { geminiApiKey }
+            .debounce(500)
+            .collect { key ->
+                prefs.edit().putString("gemini_api_key", key).apply()
+                com.example.data.gemini.GeminiClient.setApiKey(key)
+            }
     }
 
     // Collect variables from ViewModel
@@ -195,9 +209,9 @@ fun SajilAppMainScreen(
 
     var activeDetailsRecording by remember { mutableStateOf<Recording?>(null) }
     LaunchedEffect(selectedRecording) {
-        if (selectedRecording != null) {
-            activeDetailsRecording = selectedRecording
-        }
+        // Clear stale details when selection is cleared (e.g. after delete),
+        // otherwise the closed dialog flashes the old recording on next open.
+        activeDetailsRecording = selectedRecording
     }
 
     // Collect background CallStateTracker variables
@@ -279,11 +293,14 @@ fun SajilAppMainScreen(
     }
 
     var hasAccessibilityPermission by remember {
-        mutableStateOf(com.example.services.CallRecordingAccessibilityService.isServiceEnabled)
+        mutableStateOf(
+            com.example.services.CallRecordingAccessibilityService.isEnabledInSystem(context)
+        )
     }
 
     val checkAccessibilityPermission = {
-        hasAccessibilityPermission = com.example.services.CallRecordingAccessibilityService.isServiceEnabled
+        hasAccessibilityPermission =
+            com.example.services.CallRecordingAccessibilityService.isEnabledInSystem(context)
     }
 
     val requestAccessibilityPermission = {
@@ -339,6 +356,39 @@ fun SajilAppMainScreen(
         if (permissionsToRequest.isNotEmpty()) {
             permissionLauncher.launch(permissionsToRequest.toTypedArray())
         }
+    }
+
+    // Refresh permission flags when returning from Settings — remember{}
+    // snapshots go stale otherwise (mic/a11y/battery/overlay).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasMicPermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                hasPhoneStatePermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.READ_PHONE_STATE
+                ) == PackageManager.PERMISSION_GRANTED
+                hasCallLogPermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.READ_CALL_LOG
+                ) == PackageManager.PERMISSION_GRANTED
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    hasNotificationPermission = ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+                }
+                checkBatteryOptimization()
+                checkAccessibilityPermission()
+                hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    Settings.canDrawOverlays(context)
+                } else {
+                    true
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Display Toast for AI Success/Error

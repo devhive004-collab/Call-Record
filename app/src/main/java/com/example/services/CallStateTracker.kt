@@ -12,5 +12,25 @@ object CallStateTracker {
     val activeFilePath = MutableStateFlow<String?>(null)
 
     var initialSpeakerState: Boolean = false
-    var initialAudioMode: Int = 0 // AudioManager.MODE_NORMAL
+
+    /**
+     * Previous STREAM_VOICE_CALL volume saved in startRecordingCall and
+     * restored in stopRecordingCall. Misnamed historically as "audio mode"
+     * (MODE_NORMAL=2); it is a volume index, NOT an AudioManager mode.
+     * New code should use [initialVoiceCallVolume].
+     */
+    var initialAudioMode: Int = 0
+    var initialVoiceCallVolume: Int
+        get() = initialAudioMode
+        set(value) { initialAudioMode = value }
+
+    fun reset() {
+        isRecording.value = false
+        callerName.value = "مكالمة جارية"
+        durationSec.value = 0
+        activeFilePath.value = null
+        amplitudeList.value = emptyList()
+        platform.value = "CELLULAR"
+        direction.value = "INBOUND"
+    }
 }

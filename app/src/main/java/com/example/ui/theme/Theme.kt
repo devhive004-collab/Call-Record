@@ -13,42 +13,53 @@ fun MyApplicationTheme(
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = if (darkTheme) {
-        darkColorScheme(
-            primary = HighDensityPrimary,
-            onPrimary = Color(0xFF003258),
-            primaryContainer = HighDensityAccentContainer,
-            onPrimaryContainer = HighDensityOnAccentContainer,
-            secondary = HighDensityPrimary,
-            onSecondary = Color(0xFF003258),
-            secondaryContainer = HighDensityAccentContainer,
-            onSecondaryContainer = HighDensityOnAccentContainer,
-            background = HighDensityBg,
-            onBackground = HighDensityText,
-            surface = Color(0xFF28282B),
-            onSurface = HighDensityText,
-            surfaceVariant = HighDensityBg,
-            onSurfaceVariant = HighDensitySubText,
-            outline = HighDensityBorder
-        )
-    } else {
-        lightColorScheme(
-            primary = HighDensityPrimary,
-            onPrimary = Color.White,
-            primaryContainer = HighDensityAccentContainer,
-            onPrimaryContainer = HighDensityOnAccentContainer,
-            secondary = HighDensityPrimary,
-            onSecondary = Color.White,
-            secondaryContainer = HighDensityAccentContainer,
-            onSecondaryContainer = HighDensityOnAccentContainer,
-            background = HighDensityBg,
-            onBackground = HighDensityText,
-            surface = Color.White,
-            onSurface = HighDensityText,
-            surfaceVariant = HighDensityBg,
-            onSurfaceVariant = HighDensitySubText,
-            outline = HighDensityBorder
-        )
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val colorScheme = when {
+        // Honor dynamicColor on Android 12+ when requested.
+        dynamicColor && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S -> {
+            if (darkTheme) androidx.compose.material3.dynamicDarkColorScheme(context)
+            else androidx.compose.material3.dynamicLightColorScheme(context)
+        }
+        darkTheme -> {
+            darkColorScheme(
+                primary = HighDensityPrimaryDark,
+                onPrimary = HighDensityOnPrimaryDark,
+                primaryContainer = HighDensityAccentContainerDark,
+                onPrimaryContainer = HighDensityOnAccentContainerDark,
+                secondary = HighDensityPrimaryDark,
+                onSecondary = HighDensityOnPrimaryDark,
+                secondaryContainer = HighDensityAccentContainerDark,
+                onSecondaryContainer = HighDensityOnAccentContainerDark,
+                background = HighDensityBgDark,
+                onBackground = HighDensityTextDark,
+                surface = HighDensitySurfaceDark,
+                onSurface = HighDensityTextDark,
+                surfaceVariant = HighDensityBgDark,
+                onSurfaceVariant = HighDensitySubTextDark,
+                outline = HighDensityBorderDark,
+                error = Color(0xFFFFB4AB),
+                onError = Color(0xFF690005)
+            )
+        }
+        else -> {
+            lightColorScheme(
+                primary = HighDensityPrimaryLight,
+                onPrimary = HighDensityOnPrimaryLight,
+                primaryContainer = HighDensityAccentContainerLight,
+                onPrimaryContainer = HighDensityOnAccentContainerLight,
+                secondary = HighDensityPrimaryLight,
+                onSecondary = HighDensityOnPrimaryLight,
+                secondaryContainer = HighDensityAccentContainerLight,
+                onSecondaryContainer = HighDensityOnAccentContainerLight,
+                background = HighDensityBgLight,
+                onBackground = HighDensityTextLight,
+                surface = HighDensitySurfaceLight,
+                onSurface = HighDensityTextLight,
+                surfaceVariant = HighDensityBgLight,
+                onSurfaceVariant = HighDensitySubTextLight,
+                outline = HighDensityBorderLight
+            )
+        }
     }
 
     MaterialTheme(

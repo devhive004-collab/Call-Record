@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+    Auto Backup (API 31+ uses data_extraction_rules.xml; below uses this file).
+    Recordings audio lives in app-specific external Music/Sajil (not backed up
+    by default) while the Room DB is. A restore can therefore yield rows whose
+    file is missing — RecordingRepository.cleanupMissingFiles() drops those on
+    startup so history never shows unplayable corpses. Deliberately no <include>
+    of audio here: backing up hours of m4a to the 25MB cloud quota would fail.
 -->
 <full-backup-content>
     <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
+    <include domain="sharedpref" path="."/>
+    <exclude domain="sharedpref" path="device.xml"/>
 -->
 </full-backup-content>
