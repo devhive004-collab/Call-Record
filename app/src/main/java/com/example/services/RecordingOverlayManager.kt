@@ -25,8 +25,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,10 +42,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.LifecycleRegistry
-import androidx.lifecycle.ViewTreeLifecycleOwner
 import com.example.formatDuration
 import com.example.ui.theme.MicRecordingColor
 import com.example.ui.theme.SoftGray
@@ -72,7 +71,6 @@ class RecordingOverlayManager(
         appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
     private var overlayView: ComposeView? = null
-    private var lifecycleOwner: OverlayLifecycleOwner? = null
 
     /** Must run on the main thread (service callbacks already are). */
     fun show() {
@@ -82,13 +80,14 @@ class RecordingOverlayManager(
             return
         }
         try {
-            val owner = OverlayLifecycleOwner().also { it.create() }
             val view = ComposeView(appContext).apply {
                 setViewCompositionStrategy(
                     ViewCompositionStrategy.DisposeOnDetachedFromWindow
                 )
             }
-            ViewTreeLifecycleOwner.set(view, owner)
+            // No Android LifecycleOwner in a Service: state is collected with
+            // composition-scoped remember + LaunchedEffect, and everything is
+            // cancelled automatically when the view detaches (see strategy).
             view.setContent {
                 OverlayPill(
                     onStop = onStopClicked,
@@ -97,13 +96,10 @@ class RecordingOverlayManager(
             }
             windowManager.addView(view, overlayParams())
             overlayView = view
-            lifecycleOwner = owner
-            owner.resume()
             Log.d(TAG, "In-call overlay shown")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to show in-call overlay", e)
             overlayView = null
-            lifecycleOwner = null
         }
     }
 
@@ -111,11 +107,9 @@ class RecordingOverlayManager(
         val view = overlayView ?: return
         overlayView = null
         try {
-            lifecycleOwner?.destroy()
             windowManager.removeView(view)
         } catch (_: Exception) {
         }
-        lifecycleOwner = null
     }
 
     fun isShowing(): Boolean = overlayView != null
@@ -139,20 +133,17 @@ class RecordingOverlayManager(
             y = (16 * density).toInt()
         }
     }
-
-    private class OverlayLifecycleOwner : LifecycleOwner {
-        private val registry = LifecycleRegistry(this)
-        override val lifecycle: Lifecycle get() = registry
-        fun create() = registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        fun resume() = registry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-        fun destroy() = registry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-    }
 }
 
 @Composable
 private fun OverlayPill(onStop: () -> Unit, onHide: () -> Unit) {
-    val callerName by CallStateTracker.callerName.collectAsState()
-    val durationSec by CallStateTracker.durationSec.collectAsState()
+    // Composition-scoped collection (no Android lifecycle in a Service).
+    var callerName by remember { mutableStateOf(CallStateTracker.callerName.value) }
+    var durationSec by remember { mutableStateOf(CallStateTracker.durationSec.value) }
+    LaunchedEffect(Unit) {
+        launch { CallStateTracker.callerName.collect { callerName = it } }
+        launch { CallStateTracker.durationSec.collect { durationSec = it } }
+    }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Box(
