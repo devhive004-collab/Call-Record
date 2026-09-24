@@ -12,92 +12,79 @@
             "fieldPath": "id",
             "columnName": "id",
             "affinity": "INTEGER",
-            "notNull": true,
-            "primaryKeyPosition": 1
+            "notNull": true
           },
           {
             "fieldPath": "title",
             "columnName": "title",
             "affinity": "TEXT",
-            "notNull": true,
-            "primaryKeyPosition": 0
+            "notNull": true
           },
           {
             "fieldPath": "source",
             "columnName": "source",
             "affinity": "TEXT",
-            "notNull": true,
-            "primaryKeyPosition": 0
+            "notNull": true
           },
           {
             "fieldPath": "direction",
             "columnName": "direction",
             "affinity": "TEXT",
-            "notNull": true,
-            "primaryKeyPosition": 0
+            "notNull": true
           },
           {
             "fieldPath": "durationSec",
             "columnName": "durationSec",
             "affinity": "INTEGER",
-            "notNull": true,
-            "primaryKeyPosition": 0
+            "notNull": true
           },
           {
             "fieldPath": "filePath",
             "columnName": "filePath",
             "affinity": "TEXT",
-            "notNull": true,
-            "primaryKeyPosition": 0
+            "notNull": true
           },
           {
             "fieldPath": "timestamp",
             "columnName": "timestamp",
             "affinity": "INTEGER",
-            "notNull": true,
-            "primaryKeyPosition": 0
+            "notNull": true
           },
           {
             "fieldPath": "isTranscribed",
             "columnName": "isTranscribed",
             "affinity": "INTEGER",
-            "notNull": true,
-            "primaryKeyPosition": 0
+            "notNull": true
           },
           {
             "fieldPath": "transcript",
             "columnName": "transcript",
             "affinity": "TEXT",
-            "notNull": false,
-            "primaryKeyPosition": 0
+            "notNull": false
           },
           {
             "fieldPath": "summary",
             "columnName": "summary",
             "affinity": "TEXT",
-            "notNull": false,
-            "primaryKeyPosition": 0
+            "notNull": false
           },
           {
             "fieldPath": "sentiment",
             "columnName": "sentiment",
             "affinity": "TEXT",
-            "notNull": false,
-            "primaryKeyPosition": 0
+            "notNull": false
           },
           {
             "fieldPath": "importantPoints",
             "columnName": "importantPoints",
             "affinity": "TEXT",
-            "notNull": false,
-            "primaryKeyPosition": 0
+            "notNull": false
           },
           {
             "fieldPath": "notes",
             "columnName": "notes",
             "affinity": "TEXT",
-            "notNull": false,
-            "primaryKeyPosition": 0
+            "notNull": false
           }
         ],
         "primaryKey": {
