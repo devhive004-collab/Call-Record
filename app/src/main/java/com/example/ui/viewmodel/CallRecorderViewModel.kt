@@ -325,7 +325,8 @@ class CallRecorderViewModel(
         }
     }
 
-    // SIMULATED CALL ACTIONS    fun initiateQuickTestCall() {
+    // SIMULATED CALL ACTIONS
+    fun initiateQuickTestCall() {
         initiateSimulatedCall(
             callerName = "مكالمة تجريبية تلقائية",
             platform = "CELLULAR",
